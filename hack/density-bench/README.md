@@ -13,7 +13,7 @@ This is a personal harness, not reviewed or upstream. It wraps the upstream swep
 
 ## Setup used
 - Node: one `c3-highcpu-192-metal` per run (192 vCPU, 503 GiB, Hyperdisk Balanced 6k IOPS / 890 MB/s), in 3 clusters (US/EU/z3)
-- Build: main `475f49b0` + prototype switches off + histogram buckets + atunnel fix (PR #2953). gVisor 20261026.0, microVM with #3104. *(The run files record tag `5035a6fa`; I'm confirming which SHA was deployed.)*
+- Build: main `475f49b0` + prototype switches off + histogram buckets + atunnel fix (PR #2953). gVisor 20261026.0, microVM with #3104. Built from local commit `ce8f4626` with ko at deploy time. (The `commit` / `run_tag` field in the run files says `5035a6fa`. That's a driver bug: it records the default loadgen image tag, not the platform build or the image actually used, which was `7bfc72c6` per each run's `*_job.yaml`.)
 - Load generator image `7bfc72c6`. sweperf `swebench-astropy-7336`, 2 CPU / 4 GiB template, actor replaced after each task (4 cycles).
 - Capacity booking lifted (worker overcommit) so the scheduler doesn't cap first.
 
@@ -34,6 +34,7 @@ This is a personal harness, not reviewed or upstream. It wraps the upstream swep
 > **Not runnable as-is.** Project, cluster contexts, buckets, and image paths are hardcoded to my project (`CASES` near the top of `bench_driver.py`; image constants in `campaign.py`). Swap in your own before running.
 
 ## Known caveats
+- Ignore the `commit` field in `summary_*.json` and the `run_tag` in GCS paths (see Setup). Use `*_job.yaml` for the loadgen image.
 - n = 3 per cell (one run per node). Node-to-node variation is about one step.
 - The cgroup CPU metric undercounts microVM (101 vs 132 cores vs /proc/stat).
 - Node metrics drop out at the highest steps when node agents are starved.
