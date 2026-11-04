@@ -1,0 +1,51 @@
+# Density campaign: NUMA-pinned workers (node-level, A/B-able). Every 15 s, each ateworker pod's cgroup is confined to one
+# NUMA node's CPUs and memory (round-robin by sorted pod cgroup path); actor cgroups under it inherit. Delete the DaemonSet
+# and redeploy workers to undo.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: substrate-numa-pinner
+  namespace: kube-system
+  labels: {app: substrate-numa-pinner}
+spec:
+  selector: {matchLabels: {app: substrate-numa-pinner}}
+  template:
+    metadata: {labels: {app: substrate-numa-pinner}}
+    spec:
+      hostPID: true
+      nodeSelector: {bench-node: c3-metal}
+      tolerations: [{operator: Exists}]
+      priorityClassName: system-node-critical
+      containers:
+      - name: pin
+        image: gcr.io/pmandewalkar-gke-dev/ate-images/busybox:1.36
+        securityContext: {privileged: true}
+        resources: {requests: {cpu: 5m, memory: 8Mi}}
+        command:
+        - nsenter
+        - -t
+        - "1"
+        - -m
+        - --
+        - sh
+        - -c
+        - |
+          NN=$(ls -d /sys/devices/system/node/node[0-9]* | wc -l)
+          while true; do
+            pods=""
+            for d in /proc/[0-9]*; do
+              case "$(cat $d/comm 2>/dev/null)" in ateworker*)
+                cg=$(sed -n 's/^0:://p' $d/cgroup 2>/dev/null)
+                [ -n "$cg" ] && pods="$pods $(dirname /sys/fs/cgroup$cg)";;
+              esac
+            done
+            i=0
+            for p in $(echo $pods | tr ' ' '\n' | sort -u); do
+              n=$((i % NN)); cpus=$(cat /sys/devices/system/node/node$n/cpulist)
+              if [ "$(cat $p/cpuset.cpus 2>/dev/null)" != "$cpus" ]; then
+                echo $n > $p/cpuset.mems; echo $cpus > $p/cpuset.cpus; echo "pinned $p -> node$n ($cpus)"
+              fi
+              i=$((i+1))
+            done
+            sleep 15
+          done

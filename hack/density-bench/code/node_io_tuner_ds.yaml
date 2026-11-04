@@ -1,0 +1,47 @@
+# Density campaign node tuning, A/B-able. Apply = tuned; delete + apply node_io_revert_ds.yaml = defaults.
+# 1) Nishanth's PR 5 (microVM throughput): NVMe scheduler none + nr_requests 1023, ext4 commit=5,noatime on the
+#    stateful partition (/var/lib/ate lives there), 1 s dirty writeback with byte thresholds.
+# 2) cgroup2 favordynmods (TCO doc: cgroup attach pair 42 -> 2.7 ms), remounted at runtime.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: substrate-node-io-tuner
+  namespace: kube-system
+  labels: {app: substrate-node-io-tuner}
+spec:
+  selector: {matchLabels: {app: substrate-node-io-tuner}}
+  template:
+    metadata: {labels: {app: substrate-node-io-tuner}}
+    spec:
+      hostPID: true
+      nodeSelector: {bench-node: c3-metal}
+      tolerations: [{operator: Exists}]
+      priorityClassName: system-node-critical
+      containers:
+      - name: tune
+        image: gcr.io/pmandewalkar-gke-dev/ate-images/busybox:1.36
+        securityContext: {privileged: true}
+        resources: {requests: {cpu: 5m, memory: 8Mi}}
+        command:
+        - nsenter
+        - -t
+        - "1"
+        - -m
+        - -u
+        - -i
+        - -n
+        - --
+        - sh
+        - -c
+        - |
+          set -x
+          for d in /sys/block/nvme*n*; do echo none > $d/queue/scheduler; echo 1023 > $d/queue/nr_requests; done
+          mount -o remount,commit=5,noatime /mnt/stateful_partition
+          sysctl -w vm.dirty_background_bytes=1073741824
+          sysctl -w vm.dirty_bytes=34359738368
+          sysctl -w vm.dirty_expire_centisecs=500
+          sysctl -w vm.dirty_writeback_centisecs=100
+          mount -o remount,favordynmods /sys/fs/cgroup || echo "favordynmods remount failed"
+          grep -E 'stateful_partition|/sys/fs/cgroup ' /proc/mounts
+          cat /sys/block/nvme0n1/queue/scheduler
+          sleep infinity
